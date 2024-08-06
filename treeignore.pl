@@ -3,20 +3,39 @@ use warnings;
 use File::Find;
 use File::Spec;
 use File::Basename;
+use Getopt::Long;
+
+my @gitignore_files;
+my $use_default_gitignore = 0;
+
+GetOptions(
+    "gitignore=s" => \@gitignore_files,
+    "d"           => \$use_default_gitignore,
+);
+
+# Escape regex special characters in patterns
+sub escape_regex {
+    my $pattern = shift;
+    $pattern =~ s/([^\w\s])/\\$1/g;
+    return $pattern;
+}
 
 # Load .gitignore patterns
 sub load_gitignore_patterns {
-    my $gitignore_file = shift;
+    my @files = @_;
     my @patterns;
 
-    if (open my $fh, '<', $gitignore_file) {
-        while (my $line = <$fh>) {
-            chomp $line;
-            next if $line =~ /^\s*#/; # Skip comments
-            next if $line =~ /^\s*$/; # Skip empty lines
-            push @patterns, $line;
+    foreach my $gitignore_file (@files) {
+        if (open my $fh, '<', $gitignore_file) {
+            while (my $line = <$fh>) {
+                chomp $line;
+                next if $line =~ /^\s*#/; # Skip comments
+                next if $line =~ /^\s*$/; # Skip empty lines
+                $line = escape_regex($line); # Escape regex special characters
+                push @patterns, $line;
+            }
+            close $fh;
         }
-        close $fh;
     }
 
     return @patterns;
@@ -58,7 +77,22 @@ sub print_tree {
 # Generate the project tree
 sub generate_project_tree {
     my $start_path = shift || '.';
-    my @patterns = load_gitignore_patterns(File::Spec->catfile($start_path, '.gitignore'));
+    my @patterns;
+
+    if (@gitignore_files) {
+        @patterns = load_gitignore_patterns(@gitignore_files);
+    } elsif ($use_default_gitignore) {
+        my $default_gitignore = "default.gitignore";
+        # Create a default .gitignore file if it doesn't exist
+        unless (-e $default_gitignore) {
+            open(my $fh, '>', $default_gitignore) or die $!;
+            print $fh "*.log\n*.tmp\n*.bak\n";
+            close($fh);
+        }
+        @patterns = load_gitignore_patterns(File::Spec->catfile($start_path, '.gitignore'), $default_gitignore);
+    } else {
+        @patterns = load_gitignore_patterns(File::Spec->catfile($start_path, '.gitignore'));
+    }
 
     my ($vol, $dirs, $file) = File::Spec->splitpath($start_path);
     my $root_name = ($file) ? $file : basename($dirs);
